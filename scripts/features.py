@@ -349,12 +349,13 @@ def generate_synthetic_hr(duration_sec: int = 300, sampling_rate: float = 1.0,
     """Generate synthetic heart rate data for testing."""
     n_samples = int(duration_sec * sampling_rate)
     time = np.linspace(0, duration_sec, n_samples)
+    stress_effect = (stress_factor - 1.0) * 10
     
     # Base rhythm + respiratory sinus arrhythmia + noise + stress effect
     hr = (base_hr + 
           3 * np.sin(2 * np.pi * 0.25 * time) +  # 0.25 Hz respiratory rhythm
           2 * np.sin(2 * np.pi * 0.1 * time) +   # 0.1 Hz slow rhythm
-          stress_factor * 10 +                    # stress increases HR
+        stress_effect +                         # stress increases HR above baseline
           np.random.normal(0, 2, n_samples))      # noise
     
     return pd.Series(hr)

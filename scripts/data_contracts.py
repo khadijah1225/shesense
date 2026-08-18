@@ -136,38 +136,43 @@ def align_to_1hz(df: pd.DataFrame,
     # Create 1 Hz time grid
     start_time = df_resampled.index.min()
     end_time = df_resampled.index.max()
-    time_grid = pd.date_range(start=start_time, end=end_time, freq='1S')
+    time_grid = pd.date_range(start=start_time, end=end_time, freq='1s')
     
     # Reindex to 1 Hz grid
     df_resampled = df_resampled.reindex(time_grid)
     
+    # Keep a copy of missing-value structure before interpolation so we can
+    # restore long gaps that should remain missing.
+    pre_interp = df_resampled.copy()
+
     # Interpolate missing values
     numeric_cols = df_resampled.select_dtypes(include=[np.number]).columns
     
     if method == 'linear':
         df_resampled[numeric_cols] = df_resampled[numeric_cols].interpolate(method='linear', limit_direction='both')
     elif method == 'forward':
-        df_resampled[numeric_cols] = df_resampled[numeric_cols].fillna(method='ffill')
+        df_resampled[numeric_cols] = df_resampled[numeric_cols].ffill()
     elif method == 'backward':
-        df_resampled[numeric_cols] = df_resampled[numeric_cols].fillna(method='bfill')
+        df_resampled[numeric_cols] = df_resampled[numeric_cols].bfill()
     
     # Handle categorical columns (like labels)
     categorical_cols = df_resampled.select_dtypes(include=['object', 'category']).columns
-    df_resampled[categorical_cols] = df_resampled[categorical_cols].fillna(method='ffill')
+    df_resampled[categorical_cols] = df_resampled[categorical_cols].ffill()
     
     # Limit interpolation across gaps
     if max_gap:
         max_gap_seconds = pd.Timedelta(max_gap).total_seconds()
         for col in numeric_cols:
-            # Identify large gaps and set them back to NaN
-            gap_mask = df_resampled[col].isna()
-            gap_starts = gap_mask & ~gap_mask.shift(1, fill_value=False)
-            gap_ends = gap_mask & ~gap_mask.shift(-1, fill_value=False)
-            
-            for start_idx in df_resampled[gap_starts].index:
-                end_idx = df_resampled[gap_ends & (df_resampled.index >= start_idx)].index[0]
-                gap_duration = (end_idx - start_idx).total_seconds()
-                
+            # Identify long contiguous gaps from the pre-interpolation mask and
+            # restore them to NaN after interpolation.
+            gap_mask = pre_interp[col].isna()
+            gap_groups = gap_mask.ne(gap_mask.shift(fill_value=False)).cumsum()
+
+            for _, gap in gap_mask[gap_mask].groupby(gap_groups):
+                start_idx = gap.index[0]
+                end_idx = gap.index[-1]
+                gap_duration = (end_idx - start_idx).total_seconds() + 1
+
                 if gap_duration > max_gap_seconds:
                     df_resampled.loc[start_idx:end_idx, col] = np.nan
     
